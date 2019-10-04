@@ -13,6 +13,7 @@ use nphysics2d::world::{DefaultGeometricalWorld, DefaultMechanicalWorld};
 
 use ncollide2d::shape::{Ball, Cuboid, ShapeHandle};
 
+// trusting this: https://github.com/rustsim/nphysics/blob/master/src_testbed/testbed.rs#L114
 pub struct Physics {
     pub mechanical_world: DefaultMechanicalWorld<f32>,
     pub geometrical_world: DefaultGeometricalWorld<f32>,
@@ -80,12 +81,15 @@ impl Physics {
                         .geometrical_world
                         .contact_pair(&self.colliders, *h1, *h2, false)
                     {
-                        let deep = manifold.deepest_contact().unwrap();
-                        let normal: Unit<Vector2<f32>> = deep.contact.normal;
                         // if either is a box, use normal, else requires some extra maths
                         if collider1.shape_handle().is::<Cuboid<f32>>()
                             || collider2.shape_handle().is::<Cuboid<f32>>()
                         {
+                            let deep = match manifold.deepest_contact() {
+                                Some(cont) => cont,
+                                None => continue,
+                            };
+                            let normal: Unit<Vector2<f32>> = deep.contact.normal;
                             // totally sane, totally normal
                             {
                                 let body1 = self
@@ -151,7 +155,6 @@ impl Physics {
 
                             v1 += (v1cf - v1ci) * collision;
                             v2 += (v2cf - v2ci) * collision;
-                            println!("{:?}, {:?}", v1, v2);
 
                             {
                                 let body1 = self

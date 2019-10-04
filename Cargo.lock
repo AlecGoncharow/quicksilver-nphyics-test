@@ -133,7 +133,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "balls_and_wall_wasm"
+name = "balls_and_walls"
 version = "0.1.0"
 dependencies = [
  "nalgebra 0.18.1 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -1,5 +1,5 @@
 [package]
-name = "balls_and_wall_wasm"
+name = "balls_and_walls"
 version = "0.1.0"
 authors = ["Alec Goncharow <Alec.Goncharow@gmail.com>"]
 edition = "2018"
@@ -12,3 +12,5 @@ edition = "2018"
     ncollide2d = "*"
     nalgebra = "*"
     rand = "*"
+
+

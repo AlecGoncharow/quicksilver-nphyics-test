@@ -1,7 +1,9 @@
 use quicksilver::{
+    Future,
     geom::{Circle, Rectangle, Vector},
-    graphics::{Background::Col, Color},
-    lifecycle::{run, Settings, State, Window},
+    combinators::result,
+    graphics::{Background::Col, Color, Background::Img, Font, FontStyle, Image},
+    lifecycle::{run, Settings, State, Window, Asset},
     prelude::*,
     Result,
 };
@@ -21,17 +23,50 @@ use physics::Physics;
 use quicksilver::prelude::MouseButton;
 use rand::Rng;
 
-const WIDTH_LOCAL: f32 = 800.0;
-const HEIGHT_LOCAL: f32 = 600.0;
+const WIDTH_LOCAL: f32 = 1200.0;
+const HEIGHT_LOCAL: f32 = 900.0;
 
 struct DrawGeometry {
     physics: Physics,
     prev_pt: Vector2<f32>,
+    initial_rect_pt: Vector2<f32>,
     rad: f32,
-    mouse_down: bool,
+    left_down: bool,
+    right_down: bool,
+    is_wall: bool,
+    state_text: Asset<Image>,
 }
 
-// trusting this: https://github.com/rustsim/nphysics/blob/master/src_testbed/testbed.rs#L114
+impl DrawGeometry {
+    fn get_rect(&self, x: f32, y: f32) -> (f32, f32, f32, f32) {
+        let half_x = if self.initial_rect_pt.x < x {
+            (x - self.initial_rect_pt.x)/2.0
+        } else {
+           (self.initial_rect_pt.x - x)/2.0
+        };
+
+        let center_x = if self.initial_rect_pt.x < x {
+            self.initial_rect_pt.x + half_x
+        } else {
+            x + half_x
+        };
+
+        let half_y = if self.initial_rect_pt.y < y {
+            (y - self.initial_rect_pt.y)/2.0
+        } else {
+            (self.initial_rect_pt.y - y)/2.0
+        };
+
+        let center_y = if self.initial_rect_pt.y < y {
+            self.initial_rect_pt.y + half_y
+        } else {
+            y + half_y
+        };
+
+        return (center_x, center_y, half_x, half_y)
+    }
+
+}
 
 impl State for DrawGeometry {
     fn new() -> Result<DrawGeometry> {
@@ -52,28 +87,37 @@ impl State for DrawGeometry {
             constraints,
         };
 
-        physics.add_wall(200.0, 200.0, 50.0, 50.0);
-        physics.add_wall(500.0, 300.0, 50.0, 200.0);
-        physics.add_wall(300.0, 400.0, 50.0, 100.0);
-        physics.add_wall(600.0, 100.0, 100.0, 50.0);
-        physics.add_wall(100.0, 500.0, 100.0, 50.0);
-
         // bottom
         physics.add_wall(WIDTH_LOCAL / 2.0, 10.0, WIDTH_LOCAL, 20.0);
         // top
-        physics.add_wall(WIDTH_LOCAL / 2.0, HEIGHT_LOCAL - 10.0, WIDTH_LOCAL, 20.0);
+        physics.add_wall(WIDTH_LOCAL / 2.0, HEIGHT_LOCAL - 50.0, WIDTH_LOCAL, 20.0);
         // left
         physics.add_wall(10.0, HEIGHT_LOCAL / 2.0, 20.0, HEIGHT_LOCAL);
         // right
         physics.add_wall(WIDTH_LOCAL - 10.0, HEIGHT_LOCAL / 2.0, 20.0, HEIGHT_LOCAL);
 
+        let state_text = Asset::new(Font::load("font.ttf")
+            .and_then(|font| {
+                let style = FontStyle::new(50.0, Color::WHITE);
+                result(font.render("STATE: BALL", &style))
+            }));
+
         // Load/create resources here: images, fonts, sounds, etc.
         Ok(DrawGeometry {
             physics,
             prev_pt: Vector2::new(0.0, 0.0),
-            mouse_down: false,
+            left_down: false,
             rad: 0.0,
+            initial_rect_pt: Vector2::new(0.0, 0.0),
+            right_down: false,
+            is_wall: false,
+            state_text,
         })
+    }
+
+    fn update(&mut self, _window: &mut Window) -> Result<()> {
+        self.physics.step();
+        Ok(())
     }
 
     fn event(&mut self, event: &Event, window: &mut Window) -> Result<()> {
@@ -84,48 +128,118 @@ impl State for DrawGeometry {
                     let x = mouse.pos().x;
                     let y = mouse.pos().y;
                     match state {
-                        ButtonState::Pressed if !self.mouse_down => {
-                            self.mouse_down = true;
-                            let mut rng = rand::thread_rng();
-                            let scale: f32 = rng.gen();
-                            println!("Mouse button pressed: {:?}, x: {}, y: {}", button, x, y);
-                            self.rad = 5.0 + (15.0 * scale);
-                            self.prev_pt = na::base::Vector2::new(x, HEIGHT_LOCAL - y);
+                        ButtonState::Pressed if !self.left_down => {
+                            self.left_down = true;
+                            if self.is_wall {
+                                self.initial_rect_pt = na::base::Vector2::new(x, HEIGHT_LOCAL - y);
+                            } else {
+                                let mut rng = rand::thread_rng();
+                                let scale: f32 = rng.gen();
+                                //println!("Mouse button pressed: {:?}, x: {}, y: {}", button, x, y);
+                                self.rad = 5.0 + (15.0 * scale);
+                                self.prev_pt = na::base::Vector2::new(x, HEIGHT_LOCAL - y);
+                            }
                         }
 
-                        ButtonState::Released if self.mouse_down => {
-                            self.mouse_down = false;
-                            println!("Mouse button released: {:?}, x: {}, y: {}", button, x, y);
-                            let pt = na::base::Vector2::new(x, HEIGHT_LOCAL - y);
-                            let mut vel = pt - self.prev_pt;
-                            vel *= 2.0;
-                            self.physics
-                                .add_ball(self.prev_pt.x, self.prev_pt.y, vel, self.rad);
+                        ButtonState::Released if self.left_down => {
+                            self.left_down = false;
+                            if self.is_wall {
+                                //println!("Mouse button released: {:?}, x: {}, y: {}", button, x, y);
+                                let (center_x, center_y, half_x, half_y) = self.get_rect(x, HEIGHT_LOCAL - y);
+
+                                self.physics.add_wall(center_x, center_y, half_x * 2.0, half_y * 2.0);
+                            } else {
+
+                                //println!("Mouse button released: {:?}, x: {}, y: {}", button, x, y);
+                                let pt = na::base::Vector2::new(x, HEIGHT_LOCAL - y);
+                                let mut vel = pt - self.prev_pt;
+                                vel *= 2.0;
+                                self.physics
+                                    .add_ball(self.prev_pt.x, self.prev_pt.y, vel, self.rad);
+                            }
+                        }
+
+                        _ => (),
+                    }
+                }
+                MouseButton::Right => {
+                    let mouse = window.mouse();
+                    let x = mouse.pos().x;
+                    let y = mouse.pos().y;
+
+                     match state {
+                        ButtonState::Pressed if !self.right_down => {
+                            self.right_down = true;
+                            //println!("Mouse button pressed: {:?}, x: {}, y: {}", button, x, y);
+                            self.initial_rect_pt = na::base::Vector2::new(x, HEIGHT_LOCAL - y);
+                        }
+
+                        ButtonState::Released if self.right_down => {
+                            self.right_down = false;
+                            //println!("Mouse button released: {:?}, x: {}, y: {}", button, x, y);
+                            let (center_x, center_y, half_x, half_y) = self.get_rect(x, HEIGHT_LOCAL - y);
+
+                            self.physics.add_wall(center_x, center_y, half_x * 2.0, half_y * 2.0);
                         }
 
                         _ => (),
                     }
                 }
                 _ => (),
-            },
+            }
+            Event::Key(key, _state) => match key {
+                Key::W => {
+                    self.is_wall = true;
+
+                    self.state_text = Asset::new(Font::load("font.ttf")
+                        .and_then(|font| {
+                            let style = FontStyle::new(50.0, Color::WHITE);
+                            result(font.render("STATE: WALL", &style))
+                        }));
+                }
+                Key::B => {
+                    self.is_wall = false;
+
+                    self.state_text = Asset::new(Font::load("font.ttf")
+                        .and_then(|font| {
+                            let style = FontStyle::new(50.0, Color::WHITE);
+                            result(font.render("STATE: BALL", &style))
+                        }));
+                }
+                _ => ()
+            }
             _ => (),
         }
-        Ok(())
-    }
-
-    fn update(&mut self, _window: &mut Window) -> Result<()> {
-        self.physics.step();
         Ok(())
     }
 
     fn draw(&mut self, window: &mut Window) -> Result<()> {
         window.clear(Color::BLACK)?;
 
+        self.state_text.execute(|image| {
+            window.draw(&image.area().with_center((500, 20)), Img(&image));
+            Ok(())
+        })?;
+
         // draw starting pos of ball if still dragging velocity
-        if self.mouse_down {
+        if self.left_down && !self.is_wall {
             let vec = Vector2::new(self.prev_pt.x, HEIGHT_LOCAL - self.prev_pt.y);
 
             window.draw(&Circle::new((vec.x, vec.y), self.rad), Col(Color::CYAN));
+        }
+
+        if self.right_down || (self.left_down && self.is_wall) {
+            let mouse = window.mouse();
+            let x = mouse.pos().x;
+            let y = mouse.pos().y;
+
+            let (center_x, center_y, half_x, half_y) = self.get_rect(x, HEIGHT_LOCAL - y);
+
+            window.draw(
+                &Rectangle::new((center_x - half_x, HEIGHT_LOCAL - center_y - half_y), (half_x * 2.0, half_y * 2.0)),
+                Col(Color::CYAN),
+            );
+
         }
 
         for (handle, body) in self.physics.bodies.iter() {
@@ -166,5 +280,5 @@ impl State for DrawGeometry {
 }
 
 fn main() {
-    run::<DrawGeometry>("Draw Geometry", Vector::new(800, 600), Settings::default());
+    run::<DrawGeometry>("Balls And Walls", Vector::new(WIDTH_LOCAL, HEIGHT_LOCAL), Settings::default());
 }
